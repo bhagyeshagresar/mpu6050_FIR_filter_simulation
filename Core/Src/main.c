@@ -1,111 +1,125 @@
-/* USER CODE BEGIN Header */
-/**
-  ******************************************************************************
-  * @file           : main.c
-  * @brief          : Main program body
-  ******************************************************************************
-  * @attention
-  *
-  * Copyright (c) 2024 STMicroelectronics.
-  * All rights reserved.
-  *
-  * This software is licensed under terms that can be found in the LICENSE file
-  * in the root directory of this software component.
-  * If no LICENSE file comes with this software, it is provided AS-IS.
-  *
-  ******************************************************************************
-  */
-/* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "FIRfilter.h"
 
-/* Private includes ----------------------------------------------------------*/
-/* USER CODE BEGIN Includes */
-
-/* USER CODE END Includes */
-
-/* Private typedef -----------------------------------------------------------*/
-/* USER CODE BEGIN PTD */
-
-/* USER CODE END PTD */
-
-/* Private define ------------------------------------------------------------*/
-/* USER CODE BEGIN PD */
-
-/* USER CODE END PD */
-
-/* Private macro -------------------------------------------------------------*/
-/* USER CODE BEGIN PM */
-
-/* USER CODE END PM */
-
-/* Private variables ---------------------------------------------------------*/
 I2C_HandleTypeDef hi2c1;
-
 UART_HandleTypeDef huart2;
+FIRFilter lpf;
 
-/* USER CODE BEGIN PV */
 
-/* USER CODE END PV */
-
-/* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_USART2_UART_Init(void);
 static void MX_I2C1_Init(void);
-/* USER CODE BEGIN PFP */
 
-/* USER CODE END PFP */
+static const uint8_t MPU6050_ADDR = 0x68<<1;
+static const uint8_t WHO_AM_I = 0x75;
+static const uint8_t ACCEL_ZOUT_L = 0x40;
+static const uint8_t ACCEL_ZOUT_H = 0x3F;
+static const uint8_t ACCEL_XOUT_L = 0x3C;
+static const uint8_t ACCEL_XOUT_H = 0x3B;
+static const uint8_t ACCEL_CONFIG = 0x1C;
 
-/* Private user code ---------------------------------------------------------*/
-/* USER CODE BEGIN 0 */
 
-/* USER CODE END 0 */
-
-/**
-  * @brief  The application entry point.
-  * @retval int
-  */
 int main(void)
 {
-  /* USER CODE BEGIN 1 */
 
-  /* USER CODE END 1 */
-
-  /* MCU Configuration--------------------------------------------------------*/
-
-  /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
   HAL_Init();
-
-  /* USER CODE BEGIN Init */
-
-  /* USER CODE END Init */
-
-  /* Configure the system clock */
   SystemClock_Config();
-
-  /* USER CODE BEGIN SysInit */
-
-  /* USER CODE END SysInit */
-
-  /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_USART2_UART_Init();
   MX_I2C1_Init();
-  /* USER CODE BEGIN 2 */
+  FIRFilter_Init(&lpf);
 
-  /* USER CODE END 2 */
 
-  /* Infinite loop */
-  /* USER CODE BEGIN WHILE */
+  uint8_t buff[50];
+  uint8_t buff1[12];
+  uint8_t buff2[12];
+  uint8_t accel_buff1[12];
+  uint8_t accel_buff2[12];
+  HAL_StatusTypeDef ret;
+  int16_t accel_val;
+
+
+
+  uint8_t pwr_data = 0x00;
+
+  ret = HAL_I2C_Mem_Write(&hi2c1, MPU6050_ADDR, 0x6B, 1, &pwr_data, 1, 100);
+
+  if(ret == HAL_OK){
+	  strcpy((char*)buff, "Device is awake\r\n");
+  }
+  else
+  {
+	  strcpy((char*)buff, "Problem setting the sleep bit\r\n");
+   }
+
+   uint8_t accel_init = 0x00;
+
+
+   ret = HAL_I2C_Mem_Write(&hi2c1, MPU6050_ADDR, ACCEL_CONFIG, 1, &accel_init, 1, 100);
+
+	if(ret == HAL_OK){
+		strcpy((char*)buff, "Acceleration is configured\r\n");
+	 }
+	 else{
+		  strcpy((char*)buff, "Problem configuring the acceleration\r\n");
+	  }
+
+
+
+
+
   while (1)
   {
-    /* USER CODE END WHILE */
 
-    /* USER CODE BEGIN 3 */
+		// I do not understnad if HAL_I2C_Mem_Read can read two consecutive bytes or does it only read into one data buffer.
+		ret = HAL_I2C_Mem_Read(&hi2c1, MPU6050_ADDR, ACCEL_ZOUT_H, I2C_MEMADD_SIZE_8BIT , buff1, 2, 10000);
+
+		if(ret != HAL_OK){
+			strcpy((char*)buff, "Error Receiving 1st byte\r\n");
+
+		}
+		else{
+
+			;
+		}
+
+		//combine the two bytes
+		accel_val = ((buff1[0] << 8) | buff1[1]);
+
+		//
+		float accel_val_flt = accel_val/16384.0; //why 0.000061 ?
+		sprintf(accel_buff1, "%.2f\r\n", accel_val_flt);
+
+		//HAL_UART_Transmit(&huart2, accel_buff1, strlen((accel_buff1)), HAL_MAX_DELAY);
+		//HAL_Delay(500);
+
+		float filtered_val = FIRFilter_Update(&lpf, accel_val_flt);
+		sprintf(accel_buff2, "%.2f\r\n", filtered_val);
+
+
+		//HAL_UART_Transmit(&huart2, accel_buff2, strlen((accel_buff2)), HAL_MAX_DELAY);
+		//HAL_Delay(500);
+
+
+		char logBuf[128];
+
+		sprintf(logBuf, "%.2f, %.2f\r\n", accel_val_flt, filtered_val);
+
+		HAL_UART_Transmit(&huart2, logBuf, strlen((logBuf)), HAL_MAX_DELAY);
+		HAL_Delay(500);
+
+
   }
-  /* USER CODE END 3 */
+
 }
+
+
+
+
+
+
 
 /**
   * @brief System Clock Configuration
